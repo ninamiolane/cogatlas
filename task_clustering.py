@@ -14,7 +14,7 @@ import pandas as pd
 import pickle
 import urllib.request
 
-MAIN_DIR = '/Users/nina/code/mental_tasks/'
+MAIN_DIR = '/Users/nina/code/cogatlas/'
 OUTPUT_DIR = os.path.join(MAIN_DIR, 'output')
 DATA_DIR = os.path.join(MAIN_DIR, 'data')
 REPORT_DIR = os.path.join(MAIN_DIR, 'report')
@@ -46,6 +46,7 @@ class TaskMetadata(luigi.Task):
 
 
 class ImageMetadata(luigi.Task):
+    # TODO(nina): parallelize
     def requires(self):
         return {'task_metadata': TaskMetadata()}
 
@@ -66,11 +67,12 @@ class ImageMetadata(luigi.Task):
                 page_results = pd.io.json.json_normalize(data['results'])
                 dfs.append(page_results)
                 if data['next'] is 'null':
+                    print('Found null')
                     break
                 page += 100
 
                 if DEBUG:
-                    if page > 300:
+                    if page > 35000:
                         break
 
             img_metadata = pd.concat(dfs, ignore_index=True)
@@ -134,6 +136,7 @@ class ImageMetadata(luigi.Task):
 
 
 class MakeDataset(luigi.Task):
+    # TODO(nina): parallelize and check for data already there
     def requires(self):
         return {'img_metadata': ImageMetadata()}
 
@@ -164,16 +167,16 @@ class MakeDataset(luigi.Task):
 class DatasetStatistics(luigi.Task):
     def requires(self):
         return {'task_metadata': TaskMetadata(),
-                'dataset': MakeDataset()}
+                'img_metadata': ImageMetadata()}
 
     def run(self):
         task_metadata_path = self.input()['task_metadata'].path
         with open(task_metadata_path, 'rb') as pickle_file:
             task_metadata = pickle.load(pickle_file)
 
-        csv_path = self.input()['dataset'].path
+        csv_path = self.input()['img_metadata'].path
         dataset = np.genfromtxt(csv_path, delimiter=',', dtype='S')
-        labels = dataset[:, 1].astype(str)
+        labels = dataset[:, 2].astype(str)
 
         unique, counts = np.unique(labels, return_counts=True)
         label_to_count = dict(zip(unique, counts))
@@ -185,7 +188,7 @@ class DatasetStatistics(luigi.Task):
                 label_to_task_name[label]: label_to_count[label]
                 for label in unique}
 
-        fig, ax = plt.subplots(figsize=(23, 10))
+        fig, ax = plt.subplots(figsize=(23, 35))
         y_pos = np.arange(len(task_name_to_count))
         counts = np.fromiter(task_name_to_count.values(), dtype=int)
         ax.barh(y_pos, counts)
