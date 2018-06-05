@@ -1,5 +1,6 @@
 """
-Pipeline for clustering of mental tasks in Neurovault.
+Pipeline analyzing fMRI data in Neurovault,
+together with Cognitive Atlas graph.
 """
 
 import csv
