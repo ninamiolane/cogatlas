@@ -1,5 +1,5 @@
 """
-Pipeline analyzing fMRI data in Neurovault,
+Pipeline analyzing statistical maps in Neurovault,
 together with Cognitive Atlas graph.
 """
 
@@ -27,6 +27,9 @@ DEBUG = True
 
 
 class TaskMetadata(luigi.Task):
+    """
+    Extract metadata on mental tasks from the Cognitive Atlas.
+    """
 
     def run(self):
         with urllib.request.urlopen(COGNITIVE_ATLAS_URL) as url:
@@ -47,6 +50,9 @@ class TaskMetadata(luigi.Task):
 
 
 class ImageMetadata(luigi.Task):
+    """
+    Extract metadata on statistical maps from Neurovault.
+    """
     # TODO(nina): parallelize
     def requires(self):
         return {'task_metadata': TaskMetadata()}
@@ -137,6 +143,11 @@ class ImageMetadata(luigi.Task):
 
 
 class MakeDataset(luigi.Task):
+    """
+    Make dataset and store metadata in csv file where:
+    - the first column is the path to the statistical maps nii files,
+    - the second column is the ID of the mental task associated with the maps.
+    """
     # TODO(nina): parallelize and check for data already there
     def requires(self):
         return {'img_metadata': ImageMetadata()}
@@ -166,6 +177,9 @@ class MakeDataset(luigi.Task):
 
 
 class DatasetStatistics(luigi.Task):
+    """
+    Create report with statistics on the dataset.
+    """
     def requires(self):
         return {'task_metadata': TaskMetadata(),
                 'img_metadata': ImageMetadata()}
