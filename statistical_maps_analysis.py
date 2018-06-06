@@ -72,7 +72,7 @@ class NeurovaultMetadata(luigi.Task):
                 page += 100
 
                 if DEBUG:
-                    if page > 400:
+                    if page > 200:
                         break
 
             df_neurovault = pd.concat(dfs, ignore_index=True)
@@ -147,7 +147,8 @@ class DatasetMetadata(luigi.Task):
         csv_rows = np.hstack([img_files, img_ids, img_task_ids])
         df_dataset_metadata = pd.DataFrame(csv_rows)
 
-        df_dataset_metadata.to_csv(self.output().path, sep=',')
+        df_dataset_metadata.to_csv(
+            self.output().path, sep=',', index=False, header=False)
 
     def output(self):
         path = os.path.join(OUTPUT_DIR, 'dataset_metadata.csv')
