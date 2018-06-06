@@ -11,10 +11,9 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pickle
 import urllib.request
 
-MAIN_DIR = '/Users/nina/code/cogatlas/'
+MAIN_DIR = '/code/cogatlas/'
 OUTPUT_DIR = os.path.join(MAIN_DIR, 'output')
 DATA_DIR = os.path.join(MAIN_DIR, 'data')
 REPORT_DIR = os.path.join(MAIN_DIR, 'report')
@@ -23,6 +22,8 @@ NEUROVAULT_URL = 'https://neurovault.org/api/images/'
 COGNITIVE_ATLAS_URL = 'https://www.cognitiveatlas.org/api/v-alpha/task'
 
 DEBUG = True
+
+# TODO(nina): check consistent names of variables
 
 
 class TaskMetadata(luigi.Task):
@@ -187,24 +188,27 @@ class DatasetStatistics(luigi.Task):
     """
     Create report with statistics on the dataset.
     """
+    # TODO(nina): Color barplot w.r.t. which Neurovault study the data belong
     def requires(self):
         return {'task_metadata': TaskMetadata(),
                 'dataset_metadata': DatasetMetadata()}
 
     def run(self):
         task_metadata_path = self.input()['task_metadata'].path
-        with open(task_metadata_path, 'rb') as pickle_file:
-            task_metadata = pickle.load(pickle_file)
-
         csv_path = self.input()['dataset_metadata'].path
+
+        task_metadata = pd.read_csv(task_metadata_path, sep=',')
         dataset = np.genfromtxt(csv_path, delimiter=',', dtype='S')
         labels = dataset[:, 2].astype(str)
 
         unique, counts = np.unique(labels, return_counts=True)
+        print('labels = {}'.format(labels))
+        print('unique = {}'.format(unique))
         label_to_count = dict(zip(unique, counts))
         label_to_task_name = {
             task[1]['id']: task[1]['name']
             for task in task_metadata.iterrows()}
+        print('dict = {}'.format(label_to_task_name))
 
         task_name_to_count = {
                 label_to_task_name[label]: label_to_count[label]
