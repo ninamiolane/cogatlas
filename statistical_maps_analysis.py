@@ -3,13 +3,12 @@ Pipeline analyzing statistical maps in Neurovault,
 together with Cognitive Atlas graph.
 """
 
-import csv
 import json
 import logging
 import luigi
 import os
-import pylab as plt
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pickle
@@ -41,27 +40,19 @@ class TaskMetadata(luigi.Task):
         logging.debug('Tasks fields are: \n{}'.format(
             df_tasks.keys()))
 
-        with open(self.output().path, 'wb') as pickle_file:
-                pickle.dump(df_tasks, pickle_file)
+        df_tasks.to_csv(self.output().path, sep=',')
 
     def output(self):
-        path = os.path.join(OUTPUT_DIR, 'task_metadata.pkl')
+        path = os.path.join(OUTPUT_DIR, 'task_metadata.csv')
         return luigi.LocalTarget(path)
 
 
-class ImageMetadata(luigi.Task):
+class NeurovaultMetadata(luigi.Task):
     """
     Extract metadata on statistical maps from Neurovault.
     """
     # TODO(nina): parallelize
-    def requires(self):
-        return {'task_metadata': TaskMetadata()}
-
     def run(self):
-        task_metadata_path = self.input()['task_metadata'].path
-        with open(task_metadata_path, 'rb') as pickle_file:
-            task_metadata = pickle.load(pickle_file)
-
         dfs = []
 
         page = 100
@@ -74,19 +65,39 @@ class ImageMetadata(luigi.Task):
                 page_results = pd.io.json.json_normalize(data['results'])
                 dfs.append(page_results)
                 if data['next'] is 'null':
-                    print('Found null')
+                    # TODO(nina): this condition does not work
+                    logging.debug('Found null')
                     break
                 page += 100
 
                 if DEBUG:
-                    if page > 35000:
+                    if page > 400:
                         break
 
-            img_metadata = pd.concat(dfs, ignore_index=True)
+            df_neurovault = pd.concat(dfs, ignore_index=True)
             logging.info('{:d} images metadata returned by the query'.format(
-                len(img_metadata)))
+                len(df_neurovault)))
             logging.debug('Image metadata fields are: \n{}'.format(
-                img_metadata.keys()))
+                df_neurovault.keys()))
+
+            df_neurovault.to_csv(self.output().path, sep=',')
+
+    def output(self):
+        path = os.path.join(OUTPUT_DIR, 'neurovault_metadata.csv')
+        return luigi.LocalTarget(path)
+
+
+class DatasetMetadata(luigi.Task):
+    def requires(self):
+        return {'task_metadata': TaskMetadata(),
+                'neurovault_metadata': NeurovaultMetadata()}
+
+    def run(self):
+        task_metadata_path = self.input()['task_metadata'].path
+        neurovault_metadata_path = self.input()['neurovault_metadata'].path
+
+        task_metadata = pd.read_csv(task_metadata_path, sep=',')
+        neurovault_metadata = pd.read_csv(neurovault_metadata_path, sep=',')
 
         task_ids = task_metadata.id
         unique_task_ids = set(task_ids)
@@ -95,7 +106,7 @@ class ImageMetadata(luigi.Task):
         logging.info('Cognitive atlas has {:d} unique mental task IDs'.format(
             n_task_ids))
 
-        labels = img_metadata.cognitive_paradigm_cogatlas_id
+        labels = neurovault_metadata.cognitive_paradigm_cogatlas_id
         n_imgs = len(labels)
         # Bring the NaN to None
         labels = labels.where((pd.notnull(labels)), None)
@@ -119,26 +130,26 @@ class ImageMetadata(luigi.Task):
                      'in Cognitive Atlas'.format(
                          sum(mask_in_task_id), n_imgs, n_intersection))
 
-        img_files = img_metadata['file'].loc[
+        img_files = neurovault_metadata['file'].loc[
             mask_in_task_id].values
         img_files = np.expand_dims(img_files, axis=1)
-        img_ids = img_metadata['id'].loc[
+        img_ids = neurovault_metadata['id'].loc[
             mask_in_task_id].values
         img_ids = np.expand_dims(img_ids, axis=1)
-        img_task_ids = img_metadata['cognitive_paradigm_cogatlas_id'].loc[
-            mask_in_task_id].values
+        img_task_ids = neurovault_metadata[
+            'cognitive_paradigm_cogatlas_id'].loc[
+                mask_in_task_id].values
         img_task_ids = np.expand_dims(img_task_ids, axis=1)
 
         assert len(img_files) == len(img_task_ids)
 
         csv_rows = np.hstack([img_files, img_ids, img_task_ids])
-        csv_path = self.output().path
-        with open(csv_path, 'w') as csv_file:
-            writer = csv.writer(csv_file, delimiter=',')
-            writer.writerows(csv_rows)
+        df_dataset_metadata = pd.DataFrame(csv_rows)
+
+        df_dataset_metadata.to_csv(self.output().path, sep=',')
 
     def output(self):
-        path = os.path.join(OUTPUT_DIR, 'img_metadata.csv')
+        path = os.path.join(OUTPUT_DIR, 'dataset_metadata.csv')
         return luigi.LocalTarget(path)
 
 
@@ -150,26 +161,22 @@ class MakeDataset(luigi.Task):
     """
     # TODO(nina): parallelize and check for data already there
     def requires(self):
-        return {'img_metadata': ImageMetadata()}
+        return {'dataset_metadata': DatasetMetadata()}
 
     def run(self):
-        img_metadata_path = self.input()['img_metadata'].path
+        dataset_metadata_path = self.input()['dataset_metadata'].path
+        dataset_metadata = pd.read_csv(dataset_metadata_path, sep=',')
 
-        dataset_path = self.output().path
-        with open(img_metadata_path, 'r') as csv_file:
-            reader = csv.reader(csv_file, delimiter=',')
-            with open(dataset_path, 'w') as csv_file_to_write:
-                writer = csv.writer(csv_file_to_write, delimiter=',')
-                for row in reader:
-                    nii_file = row[0]
-                    nii_id = row[1]
+        nii_files = dataset_metadata.iloc[:, 0]
+        nii_ids = dataset_metadata.iloc[:, 1]
+        nii_paths = np.array(
+            [os.path.join(DATA_DIR, '{}.nii.gz'.format(nii_id))
+             for nii_id in nii_ids])
+        for nii_path, nii_file in zip(nii_paths, nii_files):
+            urllib.request.urlretrieve(nii_file, nii_path)
 
-                    nii_path = os.path.join(
-                        DATA_DIR, '{}.nii.gz'.format(nii_id))
-                    urllib.request.urlretrieve(nii_file, nii_path)
-                    row_to_write = [nii_path, row[2]]
-
-                    writer.writerow(row_to_write)
+        df_dataset = pd.concat([nii_files, nii_paths], axis=1)
+        df_dataset.to_csv(self.output().path, sep=',')
 
     def output(self):
         path = os.path.join(OUTPUT_DIR, 'dataset.csv')
@@ -182,14 +189,14 @@ class DatasetStatistics(luigi.Task):
     """
     def requires(self):
         return {'task_metadata': TaskMetadata(),
-                'img_metadata': ImageMetadata()}
+                'dataset_metadata': DatasetMetadata()}
 
     def run(self):
         task_metadata_path = self.input()['task_metadata'].path
         with open(task_metadata_path, 'rb') as pickle_file:
             task_metadata = pickle.load(pickle_file)
 
-        csv_path = self.input()['img_metadata'].path
+        csv_path = self.input()['dataset_metadata'].path
         dataset = np.genfromtxt(csv_path, delimiter=',', dtype='S')
         labels = dataset[:, 2].astype(str)
 
